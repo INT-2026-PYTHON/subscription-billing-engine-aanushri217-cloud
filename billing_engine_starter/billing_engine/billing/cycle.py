@@ -57,9 +57,30 @@ class BillingCycle:
     # --------------------------------------------------------
     def run(self, as_of: date) -> BillingResult:
         """Bill all subscriptions whose current period ends on or before `as_of`."""
-        # TODO Day 3
-        raise NotImplementedError("Day 3: implement BillingCycle.run")
+        invoices_created = 0
+        invoices_skipped_duplicate = 0
+        # Step 1: trial subscriptions whose trial period ended become ACTIVE.
+        trials_activated = self._activate_ended_trials(as_of)
 
+        # Step 2: bill every ACTIVE subscription that reached period end.
+        due_subscriptions = self.subscription_repo.get_due_for_billing(as_of)
+        for sub in due_subscriptions:
+            draft_invoice, plan = self._build_issued_invoice(sub)
+            if draft_invoice is None or plan is None:
+                continue
+
+            try:
+                self._persist_invoice_for_subscription(sub, plan.billing_period, draft_invoice)
+                invoices_created += 1
+            except sqlite3.IntegrityError:
+                # Idempotency guard: duplicate invoice for same period is skipped.
+                invoices_skipped_duplicate += 1
+
+        return BillingResult(
+            invoices_created=invoices_created,
+            invoices_skipped_duplicate=invoices_skipped_duplicate,
+            trials_activated=trials_activated,
+        )
     # --------------------------------------------------------
     def upgrade_subscription(self, subscription_id: int, new_plan_id: int, switch_date: date) -> None:
         """Mid-cycle upgrade — Day 4 stretch."""
